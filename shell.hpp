@@ -36,6 +36,8 @@ vector<Command> parse_pipeline(const string& line);
 bool check_builtins(const Command& cmd);
 
 int launch_process(const Command& cmd);
+int launch_standard_process(const Command& cmd);
+int handle_child_status(pid_t pid, int status);
 
 int handle_redirection(const Command& cmd);
 int execute_pipeline(const vector<Command>& pipeline_cmds);
