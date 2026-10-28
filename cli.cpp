@@ -175,6 +175,31 @@ bool check_builtins(const Command& cmd) {
         return true;
     }
 
+    // =======================================================
+    // เพิ่มคำสั่ง procinfo ของคนที่ 5
+    // =======================================================
+    if (command == "procinfo") {
+        int pid = -1;
+        if (cmd.args.size() >= 2) {
+            try { 
+                pid = stoi(cmd.args[1]); 
+            } catch (...) { 
+                cerr << "myshell: procinfo: invalid pid" << endl; 
+                return true; 
+            }
+        }
+        builtin_procinfo(pid);
+        return true;
+    }
+
+    // =======================================================
+    // เพิ่มคำสั่ง mytree ของคนที่ 5
+    // =======================================================
+    if (command == "mytree") {
+        builtin_mytree();
+        return true;
+    }
+
     if (command == "help") {
         cout << "====================================================\n"
              << "              Mini Unix Shell - Help                \n"
@@ -185,6 +210,8 @@ bool check_builtins(const Command& cmd) {
              << "  history        : Show command history\n"
              << "  jobs           : List background jobs\n"
              << "  fg [job_id]    : Bring a job to foreground\n"
+             << "  procinfo [pid] : Show process memory & status (Person 5)\n"
+             << "  mytree         : Show process hierarchy tree (Person 5)\n"
              << "  help           : Display this help message\n"
              << "  exit           : Exit the shell\n\n"
              << "====================================================" << endl;

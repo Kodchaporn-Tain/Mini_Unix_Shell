@@ -47,7 +47,7 @@ void add_job(pid_t pid, const string& cmd_line);
 void list_jobs();
 int builtin_fg(int job_id);
 
-void print_procinfo(pid_t pid);
-void print_process_tree();
+void builtin_procinfo(int pid);
+void builtin_mytree();
 
 #endif
