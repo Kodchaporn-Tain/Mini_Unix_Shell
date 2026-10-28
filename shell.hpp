@@ -11,11 +11,13 @@
 #include <fcntl.h>
 #include <signal.h>
 
+using namespace std;
+
 // โครงสร้างข้อมูลคำสั่งที่ใช้ร่วมกัน
 struct Command {
-    std::vector<std::string> args;
-    std::string input_file = "";
-    std::string output_file = "";
+    vector<string> args;
+    string input_file = "";
+    string output_file = "";
     bool append = false;
     bool is_background = false;
 };
@@ -24,21 +26,22 @@ struct Command {
 struct Job {
     int job_id;
     pid_t pid;
-    std::string cmd_line;
+    string cmd_line;
     bool is_active;
 };
 
-std::string read_line();
-Command parse_command(const std::string& line);
+string read_line();
+Command parse_command(const string& line);
+vector<Command> parse_pipeline(const string& line);
 bool check_builtins(const Command& cmd);
 
 int launch_process(const Command& cmd);
 
 int handle_redirection(const Command& cmd);
-int execute_pipeline(const std::vector<Command>& pipeline_cmds);
+int execute_pipeline(const vector<Command>& pipeline_cmds);
 
 void init_signals();
-void add_job(pid_t pid, const std::string& cmd_line);
+void add_job(pid_t pid, const string& cmd_line);
 void list_jobs();
 int builtin_fg(int job_id);
 
