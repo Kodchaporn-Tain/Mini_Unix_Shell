@@ -17,6 +17,46 @@ static string trim(const string& str) {
     return str.substr(first, (last - first + 1));
 }
 
+// ฟังก์ชันช่วยแทนที่ $$ ด้วย PID ของเชลล์ปัจจุบัน (เช่น procinfo $$)
+static string expand_variables(const string& token) {
+    string result = token;
+    string pid_str = to_string(getpid());
+    size_t pos = 0;
+    while ((pos = result.find("$$", pos)) != string::npos) {
+        result.replace(pos, 2, pid_str);
+        pos += pid_str.length();
+    }
+    return result;
+}
+
+// โครงสร้างช่วยสลับและคืนค่า Standard I/O สำหรับคำสั่ง Built-in ที่ใช้ Redirection
+struct RedirGuard {
+    int saved_stdin = -1;
+    int saved_stdout = -1;
+    bool ok = true;
+
+    RedirGuard(const Command& cmd) {
+        if (!cmd.input_file.empty() || !cmd.output_file.empty()) {
+            saved_stdin = dup(STDIN_FILENO);
+            saved_stdout = dup(STDOUT_FILENO);
+            if (handle_redirection(cmd) < 0) {
+                ok = false;
+            }
+        }
+    }
+
+    ~RedirGuard() {
+        if (saved_stdin != -1) {
+            dup2(saved_stdin, STDIN_FILENO);
+            close(saved_stdin);
+        }
+        if (saved_stdout != -1) {
+            dup2(saved_stdout, STDOUT_FILENO);
+            close(saved_stdout);
+        }
+    }
+};
+
 // ============================================================================
 // 1. ฟังก์ชันรับคำสั่ง (read_line)
 // ============================================================================
@@ -47,9 +87,14 @@ string read_line() {
 // ============================================================================
 Command parse_command(const string& line) {
     Command cmd;
-    vector<string> tokens;
+    struct Token {
+        string text;
+        bool is_operator;
+    };
+    vector<Token> tokens;
     string current;
     bool in_quotes = false;
+    bool had_quotes = false;
     char quote_char = '\0';
 
     for (size_t i = 0; i < line.size(); ++i) {
@@ -59,40 +104,55 @@ Command parse_command(const string& line) {
             else current += c;
         } else if (c == '"' || c == '\'') {
             in_quotes = true;
+            had_quotes = true;
             quote_char = c;
         } else if (isspace(static_cast<unsigned char>(c))) {
-            if (!current.empty()) { tokens.push_back(current); current.clear(); }
+            if (!current.empty() || had_quotes) {
+                tokens.push_back({expand_variables(current), false});
+                current.clear();
+                had_quotes = false;
+            }
         } else if (c == '<' || c == '&') {
-            if (!current.empty()) { tokens.push_back(current); current.clear(); }
-            tokens.push_back(string(1, c));
+            if (!current.empty() || had_quotes) {
+                tokens.push_back({expand_variables(current), false});
+                current.clear();
+                had_quotes = false;
+            }
+            tokens.push_back({string(1, c), true});
         } else if (c == '>') {
-            if (!current.empty()) { tokens.push_back(current); current.clear(); }
+            if (!current.empty() || had_quotes) {
+                tokens.push_back({expand_variables(current), false});
+                current.clear();
+                had_quotes = false;
+            }
             if (i + 1 < line.size() && line[i + 1] == '>') {
-                tokens.push_back(">>");
+                tokens.push_back({">>", true});
                 ++i;
             } else {
-                tokens.push_back(">");
+                tokens.push_back({">", true});
             }
         } else {
             current += c;
         }
     }
-    if (!current.empty()) tokens.push_back(current);
+    if (!current.empty() || had_quotes) {
+        tokens.push_back({expand_variables(current), false});
+    }
 
     for (size_t i = 0; i < tokens.size(); ++i) {
-        if (tokens[i] == "<") {
-            if (i + 1 < tokens.size()) cmd.input_file = tokens[++i];
+        if (tokens[i].is_operator && tokens[i].text == "<") {
+            if (i + 1 < tokens.size() && !tokens[i + 1].is_operator) cmd.input_file = tokens[++i].text;
             else cerr << "myshell: syntax error near unexpected token `<'" << endl;
-        } else if (tokens[i] == ">") {
-            if (i + 1 < tokens.size()) { cmd.output_file = tokens[++i]; cmd.append = false; }
+        } else if (tokens[i].is_operator && tokens[i].text == ">") {
+            if (i + 1 < tokens.size() && !tokens[i + 1].is_operator) { cmd.output_file = tokens[++i].text; cmd.append = false; }
             else cerr << "myshell: syntax error near unexpected token `>'" << endl;
-        } else if (tokens[i] == ">>") {
-            if (i + 1 < tokens.size()) { cmd.output_file = tokens[++i]; cmd.append = true; }
+        } else if (tokens[i].is_operator && tokens[i].text == ">>") {
+            if (i + 1 < tokens.size() && !tokens[i + 1].is_operator) { cmd.output_file = tokens[++i].text; cmd.append = true; }
             else cerr << "myshell: syntax error near unexpected token `>>'" << endl;
-        } else if (tokens[i] == "&") {
+        } else if (tokens[i].is_operator && tokens[i].text == "&") {
             cmd.is_background = true;
         } else {
-            cmd.args.push_back(tokens[i]);
+            cmd.args.push_back(tokens[i].text);
         }
     }
     return cmd;
@@ -135,6 +195,8 @@ bool check_builtins(const Command& cmd) {
     const string& command = cmd.args[0];
 
     if (command == "cd") {
+        RedirGuard guard(cmd);
+        if (!guard.ok) return true;
         const char* target_dir = nullptr;
         if (cmd.args.size() < 2 || cmd.args[1] == "~") {
             target_dir = getenv("HOME");
@@ -145,6 +207,8 @@ bool check_builtins(const Command& cmd) {
     }
 
     if (command == "pwd") {
+        RedirGuard guard(cmd);
+        if (!guard.ok) return true;
         char cwd[4096];
         if (getcwd(cwd, sizeof(cwd)) != nullptr) cout << cwd << endl;
         else perror("myshell: pwd");
@@ -152,16 +216,22 @@ bool check_builtins(const Command& cmd) {
     }
 
     if (command == "history") {
+        RedirGuard guard(cmd);
+        if (!guard.ok) return true;
         for (size_t i = 0; i < history_list.size(); ++i) cout << setw(4) << (i + 1) << "  " << history_list[i] << endl;
         return true;
     }
 
     if (command == "jobs") {
+        RedirGuard guard(cmd);
+        if (!guard.ok) return true;
         list_jobs();
         return true;
     }
 
     if (command == "fg") {
+        RedirGuard guard(cmd);
+        if (!guard.ok) return true;
         if (cmd.args.size() < 2) {
             cerr << "myshell: fg: job_id required" << endl;
         } else {
@@ -179,6 +249,8 @@ bool check_builtins(const Command& cmd) {
     // เพิ่มคำสั่ง procinfo ของคนที่ 5
     // =======================================================
     if (command == "procinfo") {
+        RedirGuard guard(cmd);
+        if (!guard.ok) return true;
         int pid = -1;
         if (cmd.args.size() >= 2) {
             try { 
@@ -196,11 +268,15 @@ bool check_builtins(const Command& cmd) {
     // เพิ่มคำสั่ง mytree ของคนที่ 5
     // =======================================================
     if (command == "mytree") {
+        RedirGuard guard(cmd);
+        if (!guard.ok) return true;
         builtin_mytree();
         return true;
     }
 
     if (command == "help") {
+        RedirGuard guard(cmd);
+        if (!guard.ok) return true;
         cout << "====================================================\n"
              << "              Mini Unix Shell - Help                \n"
              << "====================================================\n"

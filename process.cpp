@@ -62,17 +62,30 @@ int handle_child_status(pid_t pid, int status) {
 int launch_standard_process(const Command& cmd) {
     if (cmd.args.empty()) return 0;
 
+    // บล็อก SIGCHLD ชั่วคราวก่อน fork เพื่อป้องกัน Race Condition กับ sigchld_handler
+    sigset_t mask, prev_mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &mask, &prev_mask);
+
     // --- ขั้นที่ 1: fork() สร้างโปรเซสลูกที่เป็นสำเนาของ shell ---
     pid_t pid = fork();
 
     if (pid < 0) {
         // fork ล้มเหลว (เช่น โปรเซสเต็มระบบ / หน่วยความจำไม่พอ)
         perror("myshell: fork");
+        sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
         return -1;
     }
 
     if (pid == 0) {
         // ================= โค้ดส่วนนี้ทำงานใน "โปรเซสลูก" =================
+        sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
+
+        // ถ้าเป็นงานเบื้องหลัง แยก Process Group เพื่อไม่ให้โดน Ctrl+C / Ctrl+Z จากหน้าจอหลัก
+        if (cmd.is_background) {
+            setpgid(0, 0);
+        }
 
         // คืนค่า signal ให้เป็นค่าเริ่มต้น เพราะ shell อาจ ignore SIGINT/SIGTSTP ไว้
         // (ถ้าไม่ทำ คำสั่งที่รันจะกด Ctrl+C หยุดไม่ได้)
@@ -107,24 +120,34 @@ int launch_standard_process(const Command& cmd) {
     // ================= โค้ดส่วนนี้ทำงานใน "โปรเซสแม่ (shell)" =================
 
     if (cmd.is_background) {
+        setpgid(pid, pid);
         // งานเบื้องหลัง: ไม่รอ แต่ลงทะเบียนให้คนที่ 4 ติดตาม
         // (การเก็บศพ/กัน Zombie ของงานเบื้องหลังให้ใช้ SIGCHLD handler ใน init_signals ของคนที่ 4)
-        add_job(pid, join_args(cmd.args));
+        add_job(pid, join_args(cmd.args), "Running");
+        sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
         return 0;
     }
 
-    // --- ขั้นที่ 2: waitpid() รอลูกจบ เพื่อ "เก็บศพ" ป้องกัน Zombie ---
+    // --- ขั้นที่ 2: waitpid() รอลูกจบ หรือถูกหยุดด้วย Ctrl+Z (WUNTRACED) ---
     // ถ้าไม่ wait ลูกที่จบแล้วจะค้างเป็น Zombie (<defunct>) ในตาราง process
     int status = 0;
     pid_t result;
     do {
-        result = waitpid(pid, &status, 0);
+        result = waitpid(pid, &status, WUNTRACED);
     } while (result < 0 && errno == EINTR);  // ถูกสัญญาณขัดจังหวะ -> รอใหม่
 
     if (result < 0) {
         perror("myshell: waitpid");
+        sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
         return -1;
     }
+
+    // ถ้าถูกหยุดด้วย Ctrl+Z (WIFSTOPPED) ให้เก็บเข้าตาราง Job ในสถานะ Stopped
+    if (WIFSTOPPED(status)) {
+        add_job(pid, join_args(cmd.args), "Stopped");
+    }
+
+    sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
 
     // --- ขั้นที่ 3: แกะ exit status ---
     return handle_child_status(pid, status);

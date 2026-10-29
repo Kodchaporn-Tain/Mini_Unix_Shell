@@ -27,6 +27,7 @@ struct Job {
     int job_id;
     pid_t pid;
     string cmd_line;
+    string state;
     bool is_active;
 };
 
@@ -43,7 +44,7 @@ int handle_redirection(const Command& cmd);
 int execute_pipeline(const vector<Command>& pipeline_cmds);
 
 void init_signals();
-void add_job(pid_t pid, const string& cmd_line);
+void add_job(pid_t pid, const string& cmd_line, const string& state = "Running");
 void list_jobs();
 int builtin_fg(int job_id);
 

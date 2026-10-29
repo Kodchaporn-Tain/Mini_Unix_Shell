@@ -57,7 +57,7 @@ int handle_redirection(const Command& cmd) {
 int execute_pipeline(const vector<Command>& pipeline_cmds) {
     if (pipeline_cmds.empty()) return 0;
 
-    // ถ้ามีคำสั่งเดียว (ไม่มี |) โยนให้ฟังก์ชันของคนที่ 2 จัดการได้เลย[cite: 3]
+    // ถ้ามีคำสั่งเดียว (ไม่มี |) โยนให้ฟังก์ชันของคนที่ 2 จัดการได้เลย
     if (pipeline_cmds.size() == 1) {
         return launch_process(pipeline_cmds[0]);
     }
@@ -65,6 +65,13 @@ int execute_pipeline(const vector<Command>& pipeline_cmds) {
     int num_cmds = pipeline_cmds.size();
     int prev_pipe_read = -1; // เก็บปลายท่ออ่านของรอบก่อนหน้า
     vector<pid_t> child_pids;
+    bool is_bg = pipeline_cmds.back().is_background;
+
+    // บล็อก SIGCHLD ชั่วคราวเพื่อป้องกัน Race Condition กับ sigchld_handler
+    sigset_t mask, prev_mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &mask, &prev_mask);
 
     for (int i = 0; i < num_cmds; ++i) {
         int fd[2];
@@ -73,6 +80,7 @@ int execute_pipeline(const vector<Command>& pipeline_cmds) {
         if (i < num_cmds - 1) {
             if (pipe(fd) < 0) {
                 perror("myshell: pipe");
+                sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
                 return -1;
             }
         }
@@ -80,6 +88,7 @@ int execute_pipeline(const vector<Command>& pipeline_cmds) {
         pid_t pid = fork();
         if (pid < 0) {
             perror("myshell: fork in pipeline");
+            sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
             return -1;
         }
 
@@ -87,6 +96,11 @@ int execute_pipeline(const vector<Command>& pipeline_cmds) {
             // ==========================================
             // โปรเซสลูก (Child Process)
             // ==========================================
+            sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
+
+            if (is_bg) {
+                setpgid(0, 0);
+            }
 
             // คืนค่า Signal ให้กลับเป็นปกติ (เหมือนที่คนที่ 2 ทำ)
             signal(SIGINT, SIG_DFL);
@@ -109,6 +123,15 @@ int execute_pipeline(const vector<Command>& pipeline_cmds) {
             // 3. จัดการ Redirection ของคำสั่งย่อย (เผื่อมี ls | grep txt > out.txt)
             if (handle_redirection(pipeline_cmds[i]) < 0) {
                 _exit(EXIT_FAILURE);
+            }
+
+            if (pipeline_cmds[i].args.empty()) {
+                _exit(EXIT_SUCCESS);
+            }
+
+            // รองรับคำสั่ง Built-in ใน Pipeline (เช่น help | grep cd)
+            if (check_builtins(pipeline_cmds[i])) {
+                _exit(EXIT_SUCCESS);
             }
 
             // 4. เตรียมข้อมูลส่งให้ execvp
@@ -146,17 +169,17 @@ int execute_pipeline(const vector<Command>& pipeline_cmds) {
     // ==========================================
     // ขั้นตอนที่ 3: รอให้ลูกในท่อทำงานเสร็จ
     // ==========================================
-    bool is_bg = pipeline_cmds.back().is_background;
     int last_status = 0;
 
     if (is_bg) {
-        // งานเบื้องหลัง: ฝากคนที่ 4 สร้าง Job (รอคนที่ 4 ทำ init_signals/add_job เสร็จ)[cite: 3]
+        // งานเบื้องหลัง: สร้าง Job
         string full_cmd = "";
         for (size_t i = 0; i < pipeline_cmds.size(); ++i) {
             for (const auto& arg : pipeline_cmds[i].args) full_cmd += arg + " ";
             if (i < pipeline_cmds.size() - 1) full_cmd += "| ";
         }
-        add_job(child_pids.back(), full_cmd); 
+        add_job(child_pids.back(), full_cmd, "Running"); 
+        sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
         return 0;
     } else {
         // วนรอโปรเซสลูกทั้งหมด
@@ -164,17 +187,26 @@ int execute_pipeline(const vector<Command>& pipeline_cmds) {
             int status = 0;
             pid_t result;
             
-            // ใช้เงื่อนไขกันสัญญาณขัดจังหวะ (แบบเดียวกับคนที่ 2)[cite: 2]
+            // ใช้เงื่อนไขกันสัญญาณขัดจังหวะ (แบบเดียวกับคนที่ 2)
             do {
-                result = waitpid(child_pids[i], &status, 0);
+                result = waitpid(child_pids[i], &status, WUNTRACED);
             } while (result < 0 && errno == EINTR); 
 
             // แกะค่า Status เฉพาะคำสั่งสุดท้ายของ Pipeline ส่งกลับคืน
             if (i == child_pids.size() - 1 && result > 0) {
-                last_status = handle_child_status(child_pids[i], status); // เรียกฟังก์ชันของคนที่ 2[cite: 3]
+                if (WIFSTOPPED(status)) {
+                    string full_cmd = "";
+                    for (size_t j = 0; j < pipeline_cmds.size(); ++j) {
+                        for (const auto& arg : pipeline_cmds[j].args) full_cmd += arg + " ";
+                        if (j < pipeline_cmds.size() - 1) full_cmd += "| ";
+                    }
+                    add_job(child_pids[i], full_cmd, "Stopped");
+                }
+                last_status = handle_child_status(child_pids[i], status);
             }
         }
     }
 
+    sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
     return last_status;
 }

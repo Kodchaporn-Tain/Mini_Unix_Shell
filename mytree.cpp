@@ -1,6 +1,7 @@
 #include "shell.hpp"
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -12,19 +13,23 @@ using namespace std;
 // ==========================================================
 // 1. ฟังก์ชันช่วยสำหรับพิมพ์ mytree แบบ Recursive
 // ==========================================================
-void print_tree(int pid, const string& prefix, bool is_last, 
+void print_tree(int pid, const string& prefix, bool is_last, bool is_root,
                 unordered_map<int, vector<int>>& children, 
                 unordered_map<int, string>& names) {
     
     cout << prefix;
-    if (pid != 0) {
+    if (!is_root) {
         cout << (is_last ? "\\-- " : "|-- ") << pid << " [" << names[pid] << "]" << endl;
     } else {
-        cout << "System (Root)" << endl;
+        if (pid == 0) {
+            cout << "System (Root)" << endl;
+        } else {
+            cout << pid << " [" << names[pid] << "]" << endl;
+        }
     }
 
     string new_prefix = prefix;
-    if (pid != 0) {
+    if (!is_root) {
         new_prefix += (is_last ? "    " : "|   ");
     }
 
@@ -32,7 +37,7 @@ void print_tree(int pid, const string& prefix, bool is_last,
         auto& kids = children[pid];
         sort(kids.begin(), kids.end());
         for (size_t i = 0; i < kids.size(); ++i) {
-            print_tree(kids[i], new_prefix, (i == kids.size() - 1), children, names);
+            print_tree(kids[i], new_prefix, (i == kids.size() - 1), false, children, names);
         }
     }
 }
@@ -53,10 +58,11 @@ void builtin_mytree() {
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
         string folder_name = entry->d_name;
+        if (folder_name.empty()) continue;
         
         bool is_pid = true;
         for (char c : folder_name) {
-            if (!isdigit(c)) {
+            if (!isdigit(static_cast<unsigned char>(c))) {
                 is_pid = false;
                 break;
             }
@@ -68,17 +74,22 @@ void builtin_mytree() {
             ifstream stat_file(stat_path);
             
             if (stat_file.is_open()) {
-                string pid_str, comm, state, ppid_str;
-                stat_file >> pid_str >> comm >> state >> ppid_str;
-                
-                if (comm.front() == '(' && comm.back() == ')') {
-                    comm = comm.substr(1, comm.length() - 2);
+                string line;
+                if (getline(stat_file, line)) {
+                    // ชื่อโปรเซสใน /proc/[pid]/stat อยู่ในวงเล็บ (...) และอาจมีช่องว่างหรือวงเล็บซ้อนได้
+                    size_t open_paren = line.find('(');
+                    size_t close_paren = line.rfind(')');
+                    if (open_paren != string::npos && close_paren != string::npos && close_paren > open_paren) {
+                        string comm = line.substr(open_paren + 1, close_paren - open_paren - 1);
+                        istringstream iss(line.substr(close_paren + 1));
+                        string state;
+                        int ppid = 0;
+                        if (iss >> state >> ppid) {
+                            names[pid] = comm;
+                            children[ppid].push_back(pid);
+                        }
+                    }
                 }
-                
-                int ppid = stoi(ppid_str);
-                names[pid] = comm;
-                children[ppid].push_back(pid);
-                
                 stat_file.close();
             }
         }
@@ -86,6 +97,11 @@ void builtin_mytree() {
     closedir(dir);
 
     cout << "=== Process Tree ===" << endl;
-    print_tree(0, "", true, children, names);
+    // เริ่มจาก Root Process (systemd / init: pid = 1) หากมีในระบบ มิฉะนั้นเริ่มจาก 0
+    if (names.find(1) != names.end()) {
+        print_tree(1, "", true, true, children, names);
+    } else {
+        print_tree(0, "", true, true, children, names);
+    }
     cout << "====================" << endl;
 }

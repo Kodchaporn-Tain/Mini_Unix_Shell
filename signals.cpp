@@ -16,20 +16,24 @@ static int next_job_id = 1;
 
 // Signal handler สำหรับจัดการ SIGCHLD
 void sigchld_handler(int sig) {
+    (void)sig;
     int saved_errno = errno;
     int status;
     pid_t pid;
 
-    // เคลียร์ Zombie process ทั้งหมดที่หยุดการทำงานแล้วด้วย WNOHANG
+    // เคลียร์ Zombie process ทั้งหมดที่จบหรือเปลี่ยนสถานะแล้วด้วย WNOHANG
     while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
         for (auto& job : jobs) {
             if (job.pid == pid) {
                 if (WIFEXITED(status) || WIFSIGNALED(status)) {
+                    job.state = "Done";
                     job.is_active = false;
                     cout << "\n[" << job.job_id << "] Done\t" << job.cmd_line << endl;
                 } else if (WIFSTOPPED(status)) {
+                    job.state = "Stopped";
                     cout << "\n[" << job.job_id << "] Stopped\t" << job.cmd_line << endl;
                 } else if (WIFCONTINUED(status)) {
+                    job.state = "Running";
                     cout << "\n[" << job.job_id << "] Continued\t" << job.cmd_line << endl;
                 }
                 break;
@@ -48,7 +52,7 @@ void init_signals() {
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP; 
+    sa.sa_flags = SA_RESTART; 
 
     // ดักจับ SIGCHLD เพื่อเคลียร์ Zombie อัตโนมัติ
     if (sigaction(SIGCHLD, &sa, NULL) < 0) {
@@ -60,12 +64,19 @@ void init_signals() {
     signal(SIGTSTP, SIG_IGN);
 }
 
-// ฟังก์ชันเพิ่ม Job ใหม่เข้าระบบ (ทำงานเมื่อมี & ต่อท้าย)
-void add_job(pid_t pid, const string& cmd_line) {
+// ฟังก์ชันเพิ่ม Job ใหม่เข้าระบบ (ทำงานเมื่อมี & ต่อท้าย หรือเมื่อถูก Stop ด้วย Ctrl+Z)
+void add_job(pid_t pid, const string& cmd_line, const string& state) {
+    for (auto& job : jobs) {
+        if (job.pid == pid && job.is_active) {
+            job.state = state;
+            return;
+        }
+    }
     Job new_job;
     new_job.job_id = next_job_id++;
     new_job.pid = pid;
     new_job.cmd_line = cmd_line;
+    new_job.state = state;
     new_job.is_active = true;
     jobs.push_back(new_job);
 
@@ -76,7 +87,7 @@ void add_job(pid_t pid, const string& cmd_line) {
 void list_jobs() {
     for (const auto& job : jobs) {
         if (job.is_active) {
-            cout << "[" << job.job_id << "] " << job.pid << " Running\t" << job.cmd_line << endl;
+            cout << "[" << job.job_id << "] " << job.pid << " " << job.state << "\t" << job.cmd_line << endl;
         }
     }
 }
@@ -90,7 +101,14 @@ int builtin_fg(int job_id) {
             
             cout << cmd << endl;
 
+            // บล็อก SIGCHLD ชั่วคราวขณะรอใน Foreground
+            sigset_t mask, prev_mask;
+            sigemptyset(&mask);
+            sigaddset(&mask, SIGCHLD);
+            sigprocmask(SIG_BLOCK, &mask, &prev_mask);
+
             // ส่งสัญญาณ SIGCONT เผื่อโปรเซสติดสถานะ Stopped อยู่
+            job.state = "Running";
             kill(pid, SIGCONT);
 
             // รอรับสถานะแบบ Foreground
@@ -102,11 +120,17 @@ int builtin_fg(int job_id) {
 
             if (res > 0) {
                 if (WIFEXITED(status) || WIFSIGNALED(status)) {
+                    job.state = "Done";
                     job.is_active = false;
+                    jobs.erase(remove_if(jobs.begin(), jobs.end(), [](const Job& j) { return !j.is_active; }), jobs.end());
+                } else if (WIFSTOPPED(status)) {
+                    job.state = "Stopped";
                 }
+                sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
                 // นำสถานะที่ได้ส่งไปแกะข้อมูล (ใช้งานฟังก์ชันจากคนที่ 2)
                 return handle_child_status(pid, status);
             }
+            sigprocmask(SIG_SETMASK, &prev_mask, nullptr);
             return 0;
         }
     }

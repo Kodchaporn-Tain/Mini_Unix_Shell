@@ -1,2 +1,4 @@
 myshell
+*.o
 stubs.cpp
+out.txt
