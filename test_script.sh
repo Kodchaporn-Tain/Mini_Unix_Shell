@@ -4,6 +4,11 @@
 # ครอบคลุมกรณีทดสอบทั้ง 8 หัวข้อตามข้อกำหนดวิชา Operating Systems
 # ==============================================================================
 
+# หากผู้ใช้รันด้วยคำสั่ง `sh test_script.sh` ให้สลับมารันด้วย `bash` อัตโนมัติ
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
+fi
+
 set -u
 
 GREEN='\033[0;32m'
@@ -123,7 +128,7 @@ fg 2
 exit
 EOF
 )
-echo "$OUT_BG" | grep -E "(\[1\]|\[2\]|Running|Done|sleep|<defunct>)" || true
+echo "$OUT_BG" | grep -E "(\[1\]|\[2\]|Running|Done|sleep [25]|<defunct>)" || true
 check_result "รันคำสั่งเบื้องหลัง (&) และแสดงใน jobs ว่า Running" 'echo "$OUT_BG" | grep -Eq "\[1\].*Running.*sleep 2"'
 check_result "ไม่มี Zombie Process (<defunct>) ค้างหลังจากโปรเซสเบื้องหลังจบ" '! echo "$OUT_BG" | grep -Fq "sleep 2 <defunct>"'
 check_result "ดึงงานกลับมาเบื้องหน้าด้วย fg สำเร็จ" 'echo "$OUT_BG" | grep -Fq "sleep 5"'
@@ -145,9 +150,9 @@ sleep 1
 # ค้นหา PID ของ sleep 20 ที่เป็นลูกของ myshell แล้วส่ง SIGINT (เหมือนกด Ctrl+C)
 CHILD_SLEEP_PID=$(pgrep -P "$SHELL_PID" sleep || true)
 if [ -n "$CHILD_SLEEP_PID" ]; then
-    kill -SIGINT "$CHILD_SLEEP_PID" 2>/dev/null || true
+    kill -INT "$CHILD_SLEEP_PID" 2>/dev/null || true
     # ส่ง SIGINT ให้ตัว myshell เองด้วยเพื่อพิสูจน์ว่า myshell เพิกเฉยต่อ SIGINT
-    kill -SIGINT "$SHELL_PID" 2>/dev/null || true
+    kill -INT "$SHELL_PID" 2>/dev/null || true
 fi
 sleep 1
 

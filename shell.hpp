@@ -50,5 +50,20 @@ int builtin_fg(int job_id);
 
 void builtin_procinfo(int pid);
 void builtin_mytree();
+void print_banner();
+
+// ฟังก์ชันตรวจสอบว่ารันบน Terminal จริงหรือไม่ (เพื่อเปิด/ปิดสี ANSI อัตโนมัติ)
+inline bool use_color() {
+    return isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+}
+
+#define CLR_RESET   (use_color() ? "\033[0m" : "")
+#define CLR_BOLD    (use_color() ? "\033[1m" : "")
+#define CLR_GREEN   (use_color() ? "\033[1;32m" : "")
+#define CLR_CYAN    (use_color() ? "\033[1;36m" : "")
+#define CLR_YELLOW  (use_color() ? "\033[1;33m" : "")
+#define CLR_BLUE    (use_color() ? "\033[1;34m" : "")
+#define CLR_MAGENTA (use_color() ? "\033[1;35m" : "")
+#define CLR_RED     (use_color() ? "\033[1;31m" : "")
 
 #endif

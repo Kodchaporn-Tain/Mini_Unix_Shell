@@ -19,12 +19,17 @@ void print_tree(int pid, const string& prefix, bool is_last, bool is_root,
     
     cout << prefix;
     if (!is_root) {
-        cout << (is_last ? "\\-- " : "|-- ") << pid << " [" << names[pid] << "]" << endl;
+        cout << CLR_BLUE << (is_last ? "\\-- " : "|-- ") << CLR_YELLOW << pid << " ";
+        if (use_color() && pid == getpid()) {
+            cout << CLR_MAGENTA << "[" << names[pid] << "] <-- current myshell" << CLR_RESET << endl;
+        } else {
+            cout << CLR_GREEN << "[" << names[pid] << "]" << CLR_RESET << endl;
+        }
     } else {
         if (pid == 0) {
-            cout << "System (Root)" << endl;
+            cout << CLR_YELLOW << "System (Root)" << CLR_RESET << endl;
         } else {
-            cout << pid << " [" << names[pid] << "]" << endl;
+            cout << CLR_YELLOW << pid << " " << CLR_GREEN << "[" << names[pid] << "]" << CLR_RESET << endl;
         }
     }
 
@@ -96,12 +101,12 @@ void builtin_mytree() {
     }
     closedir(dir);
 
-    cout << "=== Process Tree ===" << endl;
+    cout << CLR_CYAN << "=== Process Tree ===" << CLR_RESET << endl;
     // เริ่มจาก Root Process (systemd / init: pid = 1) หากมีในระบบ มิฉะนั้นเริ่มจาก 0
     if (names.find(1) != names.end()) {
         print_tree(1, "", true, true, children, names);
     } else {
         print_tree(0, "", true, true, children, names);
     }
-    cout << "====================" << endl;
+    cout << CLR_CYAN << "====================" << CLR_RESET << endl;
 }

@@ -58,13 +58,40 @@ struct RedirGuard {
 };
 
 // ============================================================================
+// 0. ฟังก์ชันแสดงแบนเนอร์ต้อนรับเมื่อเปิดใช้งานบน Terminal (Interactive Mode)
+// ============================================================================
+void print_banner() {
+    if (!use_color()) return;
+    cout << CLR_CYAN << "╔══════════════════════════════════════════════════════════════╗\n"
+         << "║ " << CLR_GREEN << "             MINI UNIX SHELL (OS Project Demo)              " << CLR_CYAN << " ║\n"
+         << "║ " << CLR_YELLOW << "  Shell PID: " << left << setw(10) << getpid()
+         << CLR_RESET << " | Type " << CLR_GREEN << "'help'" << CLR_RESET << " for commands, "
+         << CLR_RED << "'exit'" << CLR_RESET << " to quit" << CLR_CYAN << "  ║\n"
+         << "╚══════════════════════════════════════════════════════════════╝" << CLR_RESET << "\n" << right;
+}
+
+// ============================================================================
 // 1. ฟังก์ชันรับคำสั่ง (read_line)
 // ============================================================================
 string read_line() {
     string line;
 
     while (true) {
-        cout << "myshell$ " << flush;
+        if (use_color()) {
+            char cwd[4096];
+            string dir_display = "?";
+            if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+                dir_display = cwd;
+                const char* home = getenv("HOME");
+                if (home && dir_display.find(home) == 0) {
+                    dir_display.replace(0, strlen(home), "~");
+                }
+            }
+            cout << CLR_GREEN << "myshell" << CLR_RESET << ":"
+                 << CLR_CYAN << dir_display << CLR_YELLOW << "$ " << CLR_RESET << flush;
+        } else {
+            cout << "myshell$ " << flush;
+        }
         if (!getline(cin, line)) {
             if (cin.eof()) {
                 cout << "\nexit" << endl;
@@ -277,20 +304,20 @@ bool check_builtins(const Command& cmd) {
     if (command == "help") {
         RedirGuard guard(cmd);
         if (!guard.ok) return true;
-        cout << "====================================================\n"
+        cout << CLR_CYAN << "====================================================\n"
              << "              Mini Unix Shell - Help                \n"
-             << "====================================================\n"
-             << "Built-in Commands:\n"
-             << "  cd [dir]       : Change current working directory\n"
-             << "  pwd            : Print current working directory\n"
-             << "  history        : Show command history\n"
-             << "  jobs           : List background jobs\n"
-             << "  fg [job_id]    : Bring a job to foreground\n"
-             << "  procinfo [pid] : Show process memory & status (Person 5)\n"
-             << "  mytree         : Show process hierarchy tree (Person 5)\n"
-             << "  help           : Display this help message\n"
-             << "  exit           : Exit the shell\n\n"
-             << "====================================================" << endl;
+             << "====================================================" << CLR_RESET << "\n"
+             << CLR_YELLOW << "Built-in Commands:" << CLR_RESET << "\n"
+             << "  " << CLR_GREEN << "cd [dir]      " << CLR_RESET << " : Change current working directory\n"
+             << "  " << CLR_GREEN << "pwd           " << CLR_RESET << " : Print current working directory\n"
+             << "  " << CLR_GREEN << "history       " << CLR_RESET << " : Show command history\n"
+             << "  " << CLR_GREEN << "jobs          " << CLR_RESET << " : List background jobs\n"
+             << "  " << CLR_GREEN << "fg [job_id]   " << CLR_RESET << " : Bring a job to foreground\n"
+             << "  " << CLR_GREEN << "procinfo [pid]" << CLR_RESET << " : Show process memory & status (Person 5)\n"
+             << "  " << CLR_GREEN << "mytree        " << CLR_RESET << " : Show process hierarchy tree (Person 5)\n"
+             << "  " << CLR_GREEN << "help          " << CLR_RESET << " : Display this help message\n"
+             << "  " << CLR_GREEN << "exit          " << CLR_RESET << " : Exit the shell\n\n"
+             << CLR_CYAN << "====================================================" << CLR_RESET << endl;
         return true;
     }
 

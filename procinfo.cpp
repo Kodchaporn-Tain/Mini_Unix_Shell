@@ -22,7 +22,7 @@ void builtin_procinfo(int pid) {
         return;
     }
 
-    cout << "=== Process Information (PID: " << pid << ") ===" << endl;
+    cout << CLR_CYAN << "=== Process Information (PID: " << pid << ") ===" << CLR_RESET << endl;
     string line;
     while (getline(file, line)) {
         if (line.find("Name:") == 0 || 
@@ -34,9 +34,14 @@ void builtin_procinfo(int pid) {
             line.find("voluntary_ctxt_switches:") == 0 ||
             line.find("nonvoluntary_ctxt_switches:") == 0) {
             
-            cout << line << endl;
+            size_t colon = line.find(':');
+            if (use_color() && colon != string::npos) {
+                cout << CLR_YELLOW << line.substr(0, colon + 1) << CLR_GREEN << line.substr(colon + 1) << CLR_RESET << endl;
+            } else {
+                cout << line << endl;
+            }
         }
     }
-    cout << "=======================================" << endl;
+    cout << CLR_CYAN << "=======================================" << CLR_RESET << endl;
     file.close();
 }

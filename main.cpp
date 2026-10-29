@@ -4,6 +4,7 @@ using namespace std;
 
 int main() {
     init_signals();
+    print_banner();
 
     while (true) {
         // 1. รับคำสั่งจากผู้ใช้
